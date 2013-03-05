@@ -22,7 +22,8 @@ module Toto
   Paths = {
     :templates => "templates",
     :pages => "templates/pages",
-    :articles => "articles"
+    :articles => "articles",
+    :projects => "projects"
   }
 
   def self.env
@@ -78,6 +79,13 @@ module Toto
       end}.merge archives
     end
 
+    def portfolio
+      projects = type == :html ? self.projects.reverse : self.projects
+      {:projects => projects.map do |project|
+        Article.new project, @config
+      end}
+    end
+
     def archives filter = ""
       entries = ! self.articles.empty??
         self.articles.select do |a|
@@ -93,6 +101,10 @@ module Toto
       Article.new("#{Paths[:articles]}/#{route.join('-')}.#{self[:ext]}", @config).load
     end
 
+    def project route
+      Article.new("#{Paths[:projects]}/#{route.join('-')}.haml", @config).load
+    end
+
     def /
       self[:root]
     end
@@ -105,7 +117,9 @@ module Toto
       end
 
       body, status = if Context.new.respond_to?(:"to_#{type}")
-        if route.first =~ /\d{4}/
+        if route.last =~ /projects/
+          context[projects, :projects]
+        elsif route.first =~ /\d{4}/
           case route.size
             when 1..3
               context[archives(route * '-'), :archives]
@@ -143,6 +157,14 @@ module Toto
 
     def self.articles ext
       Dir["#{Paths[:articles]}/*.#{ext}"].sort_by {|entry| File.basename(entry) }
+    end
+
+    def projects
+      self.class.projects self[:ext]
+    end
+
+    def self.projects ext
+      Dir["#{Paths[:projects]}/*.haml"].sort_by {|entry| File.basename(entry) }
     end
 
     class Context
