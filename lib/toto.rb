@@ -79,13 +79,6 @@ module Toto
       end}.merge archives
     end
 
-    def portfolio
-      projects = type == :html ? self.projects.reverse : self.projects
-      {:projects => projects.map do |project|
-        Article.new project, @config
-      end}
-    end
-
     def archives filter = ""
       entries = ! self.articles.empty??
         self.articles.select do |a|
@@ -97,12 +90,23 @@ module Toto
       return :archives => Archives.new(entries, @config)
     end
 
+    def portfolio filter = ""
+      entries = ! self.projects.empty??
+        self.projects.select do |a|
+          filter !~ /^\d{4}/ || File.basename(a) =~ /^#{filter}/
+        end.reverse.map do |project|
+          Project.new project, @config
+        end : []
+
+      return :portfolio => Portfolio.new(entries, @config)
+    end
+
     def article route
       Article.new("#{Paths[:articles]}/#{route.join('-')}.#{self[:ext]}", @config).load
     end
 
     def project route
-      Article.new("#{Paths[:projects]}/#{route.join('-')}.haml", @config).load
+      Project.new("#{Paths[:projects]}/#{route.join('-')}.haml", @config).load
     end
 
     def /
@@ -110,7 +114,6 @@ module Toto
     end
 
     def go route, env = {}, type = :html
-      raise 'hell'
       route << self./ if route.empty?
       type, path = type =~ /html|xml|json/ ? type.to_sym : :html, route.join('/')
       context = lambda do |data, page|
@@ -118,9 +121,7 @@ module Toto
       end
 
       body, status = if Context.new.respond_to?(:"to_#{type}")
-        if route.last =~ /projects/
-          context[projects, :projects]
-        elsif route.first =~ /\d{4}/
+        if route.first =~ /\d{4}/
           case route.size
             when 1..3
               context[archives(route * '-'), :archives]
@@ -176,6 +177,9 @@ module Toto
         @config, @context, @path, @env = config, ctx, path, env
         @articles = Site.articles(@config[:ext]).reverse.map do |a|
           Article.new(a, @config)
+        end
+        @projects = Site.projects(@config[:ext]).reverse.map do |a|
+          Project.new(a, @config)
         end
 
         ctx.each do |k, v|
@@ -241,6 +245,25 @@ module Toto
     alias :archive archives
   end
 
+  class Portfolio < Array
+    include Template
+
+    def initialize projects, config
+      self.replace projects
+      @config = config
+    end
+
+    def [] a
+      a.is_a?(Range) ? self.class.new(self.slice(a) || [], @config) : super
+    end
+
+    def to_html
+      super(:portfolio, @config)
+    end
+    alias :to_s to_html
+    # alias :project projects
+  end
+
   class Article < Hash
     include Template
 
@@ -302,6 +325,70 @@ module Toto
     def date()    @config[:date].call(self[:date])           end
     def author()  self[:author] || @config[:author]          end
     def to_html() self.load; super(:article, @config)        end
+    alias :to_s to_html
+  end
+
+  class Project < Hash
+    include Template
+
+    def initialize obj, config = {}
+      @obj, @config = obj, config
+      self.load if obj.is_a? Hash
+    end
+
+    def load
+      data = if @obj.is_a? String
+        meta, self[:body] = File.read(@obj).split(/\n\n/, 2)
+
+        # use the date from the filename, or else toto won't find the article
+        @obj =~ /\/(\d{4}-\d{2}-\d{2})[^\/]*$/
+        ($1 ? {:date => $1} : {}).merge(YAML.load(meta))
+      elsif @obj.is_a? Hash
+        @obj
+      end.inject({}) {|h, (k,v)| h.merge(k.to_sym => v) }
+
+      self.taint
+      self.update data
+      self[:date] = Date.parse(self[:date].gsub('/', '-')) rescue Date.today
+      self
+    end
+
+    def [] key
+      self.load unless self.tainted?
+      super
+    end
+
+    def slug
+      self[:slug] || self[:title].slugize
+    end
+
+    def summary length = nil
+      config = @config[:summary]
+      sum = if self[:body] =~ config[:delim]
+        self[:body].split(config[:delim]).first
+      else
+        self[:body].match(/(.{1,#{length || config[:length] || config[:max]}}.*?)(\n|\Z)/m).to_s
+      end
+      markdown(sum.length == self[:body].length ? sum : sum.strip.sub(/\.\Z/, '&hellip;'))
+    end
+
+    def url
+      "http://#{(@config[:url].sub("http://", '') + self.path).squeeze('/')}"
+    end
+    alias :permalink url
+
+    def body
+      markdown self[:body].sub(@config[:summary][:delim], '') rescue markdown self[:body]
+    end
+
+    def path
+      "/#{@config[:prefix]}#{self[:date].strftime("/%Y/%m/%d/#{slug}/")}".squeeze('/')
+    end
+
+    def title()   self[:title] || "a project"               end
+    def date()    @config[:date].call(self[:date])           end
+    def author()  self[:author] || @config[:author]          end
+    def to_html() self.load; super(:project, @config)        end
     alias :to_s to_html
   end
 
