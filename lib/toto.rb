@@ -110,6 +110,7 @@ module Toto
     end
 
     def go route, env = {}, type = :html
+      raise 'hell'
       route << self./ if route.empty?
       type, path = type =~ /html|xml|json/ ? type.to_sym : :html, route.join('/')
       context = lambda do |data, page|
